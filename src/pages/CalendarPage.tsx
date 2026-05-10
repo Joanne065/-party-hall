@@ -35,7 +35,7 @@ export function CalendarPage() {
   const eventsQuery = trpc.event.list.useQuery(queryParams);
 
   const calendarEvents =
-    eventsQuery.data?.map((evt) => ({
+    eventsQuery.data?.map((evt: { id: number; title: string; date: string; status: string }) => ({
       id: String(evt.id),
       title: evt.title,
       date: evt.date,

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
+import { useImageCompress } from "@/hooks/useImageCompress";
 import {
   ArrowLeft, Copy, Pencil, Trash2, Upload, X, Download,
   MapPin, CalendarDays, Users, Sparkles, Lightbulb,
@@ -68,6 +69,8 @@ function Lightbox({
         src={img.url}
         alt=""
         className="max-w-[95%] max-h-[90vh] object-contain"
+        loading="eager"
+        decoding="async"
         onClick={(e) => e.stopPropagation()}
       />
 
@@ -215,7 +218,7 @@ export function EventDetailPage() {
     if (evt.title) lines.push(evt.title);
     if (evt.description) lines.push("\n" + evt.description);
     if (evt.tags && evt.tags.length > 0) {
-      lines.push("\n" + evt.tags.map((t) => "#" + t).join(" "));
+      lines.push("\n" + evt.tags.map((t: string) => "#" + t).join(" "));
     }
 
     const text = lines.join("").trim();
@@ -292,6 +295,8 @@ export function EventDetailPage() {
               src={allImages[0].url}
               alt={event.title}
               className="w-full h-full object-cover cursor-pointer"
+              loading="lazy"
+              decoding="async"
               onClick={() => openLightbox(0)}
             />
             {/* 状态标签 */}
@@ -504,6 +509,7 @@ function EventPhotosSection({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const utils = trpc.useUtils();
+  const { compressFiles } = useImageCompress();
 
   const uploadMutation = trpc.photo.upload.useMutation({
     onSuccess: () => { utils.event.getById.invalidate({ id: eventId }); toast.success("照片上传成功"); },
@@ -515,13 +521,12 @@ function EventPhotosSection({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length) return;
-    const fileList = [];
-    for (const file of files) {
-      const reader = new FileReader();
-      const data = await new Promise<string>((resolve) => { reader.onloadend = () => resolve(reader.result as string); reader.readAsDataURL(file); });
-      fileList.push({ name: file.name, data });
+    toast.loading("正在压缩图片...", { id: "compress" });
+    const fileList = await compressFiles(files);
+    toast.dismiss("compress");
+    if (fileList.length > 0) {
+      uploadMutation.mutate({ eventId, files: fileList });
     }
-    uploadMutation.mutate({ eventId, files: fileList });
     e.target.value = "";
   };
 
@@ -551,7 +556,7 @@ function EventPhotosSection({
               style={{ width: 120, height: 120 }}
               onClick={() => onOpenLightbox(i)}
             >
-              <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+              <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100">
                 <a href={photo.url} download={photo.filename || "photo"} onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-full bg-white/20">
                   <Download className="w-3.5 h-3.5 text-white" />
@@ -674,7 +679,7 @@ function ReviewSection({ eventId, isAdmin, review, onPhotoClick }: { eventId: nu
                   style={{ width: 100, height: 100 }}
                   onClick={() => onPhotoClick?.(photo.url)}
                 >
-                  <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                  <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                     <a
                       href={photo.url}
@@ -701,6 +706,7 @@ function ReviewSection({ eventId, isAdmin, review, onPhotoClick }: { eventId: nu
 function ReviewPhotosUpload({ reviewId, eventId, isAdmin }: { reviewId?: number; eventId: number; isAdmin: boolean }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const utils = trpc.useUtils();
+  const { compressFiles } = useImageCompress();
 
   const uploadMutation = trpc.review.uploadPhoto.useMutation({
     onSuccess: () => { utils.review.getByEventId.invalidate({ eventId }); toast.success("上传成功"); },
@@ -710,13 +716,12 @@ function ReviewPhotosUpload({ reviewId, eventId, isAdmin }: { reviewId?: number;
     if (!reviewId) { toast.error("请先保存回顾信息"); return; }
     const files = e.target.files;
     if (!files?.length) return;
-    const fileList = [];
-    for (const file of files) {
-      const reader = new FileReader();
-      const data = await new Promise<string>((resolve) => { reader.onloadend = () => resolve(reader.result as string); reader.readAsDataURL(file); });
-      fileList.push({ name: file.name, data });
+    toast.loading("正在压缩图片...", { id: "compress-review" });
+    const fileList = await compressFiles(files);
+    toast.dismiss("compress-review");
+    if (fileList.length > 0) {
+      uploadMutation.mutate({ reviewId, files: fileList });
     }
-    uploadMutation.mutate({ reviewId, files: fileList });
     e.target.value = "";
   };
 

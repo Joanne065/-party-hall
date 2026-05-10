@@ -4,6 +4,7 @@ import { db } from "./queries/connection";
 import { eventReviews, reviewPhotos } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { adminOnly } from "./middleware";
+import { uploadToCloudinary } from "./lib/cloudinary";
 
 export const reviewRouter = router({
   getByEventId: publicQuery
@@ -77,31 +78,48 @@ export const reviewRouter = router({
       const results = [];
 
       for (const file of input.files) {
-        const base64Data = file.data.replace(/^data:image\/\w+;base64,/, "");
-        const buffer = Buffer.from(base64Data, "base64");
-        const filename = `${Date.now()}-${file.name}`;
-        const fs = await import("fs/promises");
-        const path = await import("path");
-        const uploadDir = path.join(process.cwd(), "public", "uploads");
+        // 先尝试上传到 Cloudinary
+        const cloudinaryResult = await uploadToCloudinary(file.data, file.name);
 
-        try {
-          await fs.mkdir(uploadDir, { recursive: true });
-        } catch { /* ignore */ }
+        if (cloudinaryResult) {
+          const result = await db.insert(reviewPhotos).values({
+            reviewId: input.reviewId,
+            url: cloudinaryResult.url,
+            filename: file.name,
+          });
+          results.push({
+            id: Number(result.lastInsertRowid),
+            url: cloudinaryResult.url,
+            filename: file.name,
+          });
+        } else {
+          // Cloudinary 失败，回退到本地存储
+          const base64Data = file.data.replace(/^data:image\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Data, "base64");
+          const filename = `${Date.now()}-${file.name}`;
+          const fs = await import("fs/promises");
+          const path = await import("path");
+          const uploadDir = path.join(process.cwd(), "public", "uploads");
 
-        const filePath = path.join(uploadDir, filename);
-        await fs.writeFile(filePath, buffer);
+          try {
+            await fs.mkdir(uploadDir, { recursive: true });
+          } catch { /* ignore */ }
 
-        const result = await db.insert(reviewPhotos).values({
-          reviewId: input.reviewId,
-          url: `/uploads/${filename}`,
-          filename: file.name,
-        });
+          const filePath = path.join(uploadDir, filename);
+          await fs.writeFile(filePath, buffer);
 
-        results.push({
-          id: Number(result.lastInsertRowid),
-          url: `/uploads/${filename}`,
-          filename: file.name,
-        });
+          const result = await db.insert(reviewPhotos).values({
+            reviewId: input.reviewId,
+            url: `/uploads/${filename}`,
+            filename: file.name,
+          });
+
+          results.push({
+            id: Number(result.lastInsertRowid),
+            url: `/uploads/${filename}`,
+            filename: file.name,
+          });
+        }
       }
 
       return results;
@@ -118,12 +136,14 @@ export const reviewRouter = router({
         .limit(1);
 
       if (photo.length > 0) {
-        const fs = await import("fs/promises");
-        const path = await import("path");
-        const filePath = path.join(process.cwd(), "public", photo[0].url);
-        try {
-          await fs.unlink(filePath);
-        } catch { /* ignore */ }
+        if (photo[0].url.startsWith("/uploads/")) {
+          const fs = await import("fs/promises");
+          const path = await import("path");
+          const filePath = path.join(process.cwd(), "public", photo[0].url);
+          try {
+            await fs.unlink(filePath);
+          } catch { /* ignore */ }
+        }
       }
 
       await db.delete(reviewPhotos).where(eq(reviewPhotos.id, input.id));

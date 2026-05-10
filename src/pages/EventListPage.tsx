@@ -108,7 +108,7 @@ export function EventListPage() {
   });
 
   const filteredEvents =
-    eventsQuery.data?.filter((evt) => {
+    eventsQuery.data?.filter((evt: { title: string }) => {
       if (!search) return true;
       return evt.title.toLowerCase().includes(search.toLowerCase());
     }) ?? [];

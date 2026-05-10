@@ -19,9 +19,9 @@ app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 // Serve uploads directory
 app.use("/uploads/*", async (c) => {
   try {
-    const fs = await import("fs/promises");
+    const fsPromises = await import("fs/promises");
     const filePath = path.join(process.cwd(), "public", c.req.path);
-    const file = await fs.readFile(filePath);
+    const file = await fsPromises.readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
     const contentType =
       ext === ".png"
@@ -31,7 +31,12 @@ app.use("/uploads/*", async (c) => {
         : ext === ".gif"
         ? "image/gif"
         : "application/octet-stream";
-    return new Response(file, { headers: { "Content-Type": contentType } });
+    return new Response(file, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
   } catch {
     return c.json({ error: "Not found" }, 404);
   }

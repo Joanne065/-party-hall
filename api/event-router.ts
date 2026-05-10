@@ -32,14 +32,14 @@ export const eventRouter = router({
         .orderBy(desc(events.date));
 
       // Fetch photos for each event
-      const eventIds = result.map((r) => r.id);
+      const eventIds = result.map((r: typeof events.$inferSelect) => r.id);
 
       // Actually we need all photos for all events
       const allPhotos = eventIds.length > 0
-        ? await Promise.all(eventIds.map(id => db.select().from(eventPhotos).where(eq(eventPhotos.eventId, id))))
+        ? await Promise.all(eventIds.map((id: number) => db.select().from(eventPhotos).where(eq(eventPhotos.eventId, id))))
         : [];
 
-      return result.map((evt, i) => ({
+      return result.map((evt: typeof events.$inferSelect, i: number) => ({
         ...evt,
         photos: allPhotos[i] || [],
       }));

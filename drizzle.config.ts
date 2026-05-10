@@ -5,6 +5,6 @@ export default defineConfig({
   out: "./db/migrations",
   dialect: "sqlite",
   dbCredentials: {
-    url: "./eventhub.db",
+    url: process.env.TURSO_DATABASE_URL || "./eventhub.db",
   },
 });
