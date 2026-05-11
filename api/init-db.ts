@@ -1,107 +1,106 @@
 /**
- * 数据库初始化
- * 启动时自动创建表和默认密码
- * 支持 Turso 云端和本地 SQLite
+ * 数据库初始化 - 使用 Drizzle 迁移
+ * 启动时自动创建表
  */
 
-import { db } from "./queries/connection";
-import { passwordConfig } from "@db/schema";
 import { sql } from "drizzle-orm";
-import bcryptjs from "bcryptjs";
+import { db } from "./queries/connection";
 
-// 注意：这里用动态导入避免循环依赖
 export async function initDatabase() {
   try {
-    console.log("[DB] Initializing database...");
+    console.log("[DB] Checking database...");
 
-    // 创建所有表（如果不存在）
-    await db.run(sql`
-      CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        date TEXT NOT NULL,
-        start_time TEXT,
-        end_time TEXT,
-        location TEXT,
-        description TEXT,
-        tags TEXT,
-        status TEXT NOT NULL DEFAULT 'pending',
-        cover_image TEXT,
-        created_at INTEGER DEFAULT (unixepoch()),
-        updated_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
+    // 检查 events 表是否存在
+    const result = await db.get(sql`SELECT name FROM sqlite_master WHERE type='table' AND name='events'`);
 
-    await db.run(sql`
-      CREATE TABLE IF NOT EXISTS event_photos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id INTEGER NOT NULL,
-        url TEXT NOT NULL,
-        filename TEXT,
-        created_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
+    if (!result) {
+      console.log("[DB] Creating tables...");
 
-    await db.run(sql`
-      CREATE TABLE IF NOT EXISTS event_reviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id INTEGER NOT NULL,
-        attendance INTEGER,
-        atmosphere TEXT,
-        improvements TEXT,
-        summary TEXT,
-        created_at INTEGER DEFAULT (unixepoch()),
-        updated_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
+      // 创建所有表
+      await db.run(sql`
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          date TEXT NOT NULL,
+          start_time TEXT,
+          end_time TEXT,
+          location TEXT,
+          description TEXT,
+          tags TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          cover_image TEXT,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
 
-    await db.run(sql`
-      CREATE TABLE IF NOT EXISTS review_photos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        review_id INTEGER NOT NULL,
-        url TEXT NOT NULL,
-        filename TEXT,
-        created_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
+      await db.run(sql`
+        CREATE TABLE event_photos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id INTEGER NOT NULL,
+          url TEXT NOT NULL,
+          filename TEXT,
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
 
-    await db.run(sql`
-      CREATE TABLE IF NOT EXISTS password_config (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        admin_password TEXT NOT NULL,
-        visitor_password TEXT NOT NULL,
-        updated_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
+      await db.run(sql`
+        CREATE TABLE event_reviews (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id INTEGER NOT NULL,
+          attendance INTEGER,
+          atmosphere TEXT,
+          improvements TEXT,
+          summary TEXT,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
 
-    await db.run(sql`
-      CREATE TABLE IF NOT EXISTS auth_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        token TEXT NOT NULL UNIQUE,
-        role TEXT NOT NULL,
-        expires_at INTEGER NOT NULL,
-        created_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
+      await db.run(sql`
+        CREATE TABLE review_photos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          review_id INTEGER NOT NULL,
+          url TEXT NOT NULL,
+          filename TEXT,
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
 
-    console.log("[DB] Tables created successfully");
+      await db.run(sql`
+        CREATE TABLE password_config (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          admin_password TEXT NOT NULL,
+          visitor_password TEXT NOT NULL,
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
 
-    // 检查是否需要插入默认密码
-    try {
-      const existing = await db.select().from(passwordConfig).limit(1);
-      if (existing.length === 0) {
-        await db.insert(passwordConfig).values({
-          adminPassword: await bcryptjs.hash("admin123", 10),
-          visitorPassword: await bcryptjs.hash("guest", 10),
-        });
-        console.log("[DB] Default passwords seeded");
-      }
-    } catch {
-      console.log("[DB] Password config check skipped");
+      await db.run(sql`
+        CREATE TABLE auth_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token TEXT NOT NULL UNIQUE,
+          role TEXT NOT NULL,
+          expires_at INTEGER NOT NULL,
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
+
+      // 插入默认密码
+      const bcryptjs = await import("bcryptjs");
+      await db.run(sql`
+        INSERT INTO password_config (admin_password, visitor_password)
+        VALUES (${await bcryptjs.hash("admin123", 10)}, ${await bcryptjs.hash("guest", 10)})
+      `);
+
+      console.log("[DB] Tables created and seeded successfully");
+    } else {
+      console.log("[DB] Tables already exist");
     }
 
-    console.log("[DB] Initialization complete");
+    console.log("[DB] Database ready");
   } catch (error) {
-    console.error("[DB] Init error:", error);
+    console.error("[DB] Init error (non-fatal):", error);
+    // 不抛出错误，让服务继续启动
   }
 }
