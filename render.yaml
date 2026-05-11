@@ -12,3 +12,8 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      # 图片持久化与 CDN（不设则生产环境上传会报错，避免写入临时盘）
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_UPLOAD_PRESET
+        sync: false

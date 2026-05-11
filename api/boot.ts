@@ -4,6 +4,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
+import { seedDefaultPasswordsIfEmpty } from "./lib/seedPasswords";
 import { serveStatic } from "@hono/node-server/serve-static";
 import fs from "fs";
 import path from "path";
@@ -13,6 +14,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = new Hono<{ Bindings: HttpBindings }>();
+
+void seedDefaultPasswordsIfEmpty();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 

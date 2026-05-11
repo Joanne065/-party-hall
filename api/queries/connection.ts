@@ -3,14 +3,29 @@ import Database from "better-sqlite3";
 import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
 import { drizzle as drizzleBetter } from "drizzle-orm/better-sqlite3";
 import * as schema from "@db/schema";
+import {
+  allowEphemeralSqliteInProduction,
+  hasTursoCredentials,
+  isProduction,
+} from "../lib/deployPersistence";
 
-const isProduction = process.env.NODE_ENV === "production";
 const tursoUrl = process.env.TURSO_DATABASE_URL;
 const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
 let db: ReturnType<typeof drizzleLibsql> | ReturnType<typeof drizzleBetter>;
 
-if (isProduction && tursoUrl && tursoToken) {
+if (isProduction() && !hasTursoCredentials()) {
+  if (!allowEphemeralSqliteInProduction()) {
+    throw new Error(
+      "[party-hall] 生产环境未配置 TURSO_DATABASE_URL / TURSO_AUTH_TOKEN：数据库会使用容器内临时文件，重新部署后活动与记录会丢失。请在 Turso 创建数据库并填入上述变量；若你自行挂载持久盘使用 SQLite，可设置 ALLOW_EPHEMERAL_DB=1。"
+    );
+  }
+  console.warn(
+    "[DB] WARNING: production 使用本地 SQLite（eventhub.db）。除非磁盘持久挂载，否则重新部署会丢数据。"
+  );
+}
+
+if (isProduction() && tursoUrl && tursoToken) {
   // 生产环境：Turso 云端数据库
   const client = createClient({
     url: tursoUrl,
@@ -88,15 +103,11 @@ if (isProduction && tursoUrl && tursoToken) {
     )
   `).catch(() => {});
 
-  // 插入默认密码
-  client.execute(`
-    INSERT OR IGNORE INTO password_config (id, admin_password, visitor_password)
-    VALUES (1, '$2a$10$dummyhashfordemopurposesonly01', '$2a$10$dummyhashfordemopurposesonly02')
-  `).catch(() => {});
+  // 默认密码由 api/lib/seedPasswords.ts 在启动时用 bcrypt 写入（此处占位 SQL 无法生成合法 hash）
 
   console.log("[DB] Using Turso cloud database");
-} else {
-  // 本地开发：SQLite 文件
+} else if (!isProduction() || !tursoUrl || !tursoToken) {
+  // 本地开发，或未配置 Turso 时的降级：SQLite 文件
   const sqlite = new Database("./eventhub.db");
   db = drizzleBetter(sqlite, { schema });
   console.log("[DB] Using local SQLite");

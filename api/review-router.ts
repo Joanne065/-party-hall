@@ -5,6 +5,7 @@ import { eventReviews, reviewPhotos } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { adminOnly } from "./middleware";
 import { uploadToCloudinary } from "./lib/cloudinary";
+import { assertLocalImageFallbackAllowed } from "./lib/imageUploadGuard";
 
 export const reviewRouter = router({
   getByEventId: publicQuery
@@ -93,7 +94,7 @@ export const reviewRouter = router({
             filename: file.name,
           });
         } else {
-          // Cloudinary 失败，回退到本地存储
+          assertLocalImageFallbackAllowed();
           const base64Data = file.data.replace(/^data:image\/\w+;base64,/, "");
           const buffer = Buffer.from(base64Data, "base64");
           const filename = `${Date.now()}-${file.name}`;
