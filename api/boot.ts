@@ -4,6 +4,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
+import { initDatabase } from "./init-db";
 import { serveStatic } from "@hono/node-server/serve-static";
 import fs from "fs";
 import path from "path";
@@ -53,6 +54,9 @@ app.use("/api/trpc/*", async (c) => {
 });
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
+
+// 启动时自动初始化数据库
+initDatabase().catch(console.error);
 
 // Static files and SPA fallback
 const distPath = path.resolve(__dirname, "public");
