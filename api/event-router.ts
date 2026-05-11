@@ -2,7 +2,7 @@ import { z } from "zod";
 import { router, publicQuery } from "./router-base";
 import { db } from "./queries/connection";
 import { events, eventPhotos, eventReviews, reviewPhotos } from "@db/schema";
-import { eq, and, like, desc } from "drizzle-orm";
+import { eq, and, like, desc, gte, lte } from "drizzle-orm";
 import { adminOnly } from "./middleware";
 
 export const eventRouter = router({
@@ -11,13 +11,19 @@ export const eventRouter = router({
       z
         .object({
           month: z.string().optional(),
+          /** 含日历格子上、下月的可见区间（YYYY-MM-DD），与 month 二选一优先用区间 */
+          dateFrom: z.string().optional(),
+          dateTo: z.string().optional(),
           status: z.string().optional(),
         })
         .optional()
     )
     .query(async ({ input }) => {
       const conditions = [];
-      if (input?.month) {
+      if (input?.dateFrom && input?.dateTo) {
+        conditions.push(gte(events.date, input.dateFrom));
+        conditions.push(lte(events.date, input.dateTo));
+      } else if (input?.month) {
         conditions.push(like(events.date, `${input.month}%`));
       }
       if (input?.status) {

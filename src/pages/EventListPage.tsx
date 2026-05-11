@@ -11,41 +11,104 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { listThumbnailUrl } from "@/lib/imageUrl";
+
+type GroupedDiscoveryEvent = {
+  groupKey: string;
+  title: string;
+  dates: string[];
+  primaryId: number;
+  status: "confirmed" | "pending";
+  coverRawUrl: string | null;
+};
+
+function groupEventsByTitle(raw: any[]): GroupedDiscoveryEvent[] {
+  const map = new Map<string, any[]>();
+  for (const e of raw) {
+    const key = String(e.title ?? "").trim();
+    const bucketKey = key.length ? key : `__id_${e.id}`;
+    if (!map.has(bucketKey)) map.set(bucketKey, []);
+    map.get(bucketKey)!.push(e);
+  }
+  const groups: GroupedDiscoveryEvent[] = [];
+  for (const [, evts] of map) {
+    const sorted = [...evts].sort((a, b) => a.date.localeCompare(b.date));
+    const anyConfirmed = sorted.some((x) => x.status === "confirmed");
+    const coverSource =
+      sorted.find((x) => x.coverImage || (x.photos?.length ?? 0) > 0) ?? sorted[0];
+    const coverRawUrl =
+      coverSource.coverImage ||
+      (coverSource.photos?.length ? coverSource.photos[0].url : null);
+    groups.push({
+      groupKey: sorted.map((x: { id: number }) => x.id).sort((a, b) => a - b).join("-"),
+      title: sorted[0].title,
+      dates: sorted.map((x: { date: string }) => x.date),
+      primaryId: sorted[0].id,
+      status: anyConfirmed ? "confirmed" : "pending",
+      coverRawUrl,
+    });
+  }
+  groups.sort((a, b) => a.dates[0].localeCompare(b.dates[0]));
+  return groups;
+}
 
 /* ===== 瀑布流两列布局 ===== */
-function WaterfallGrid({ events }: { events: any[] }) {
+function WaterfallGrid({ groups }: { groups: GroupedDiscoveryEvent[] }) {
   const navigate = useNavigate();
 
-  const leftCol: typeof events = [];
-  const rightCol: typeof events = [];
+  const leftCol: typeof groups = [];
+  const rightCol: typeof groups = [];
   let leftH = 0;
   let rightH = 0;
 
-  events.forEach((evt) => {
-    const hasImg = !!(evt.coverImage || (evt.photos && evt.photos.length > 0));
-    const h = hasImg ? 320 : 180;
-    if (leftH <= rightH) { leftCol.push(evt); leftH += h; }
-    else { rightCol.push(evt); rightH += h; }
+  groups.forEach((g) => {
+    const hasImg = !!g.coverRawUrl;
+    const extraDates = Math.max(0, g.dates.length - 1);
+    const h = (hasImg ? 320 : 180) + extraDates * 16;
+    if (leftH <= rightH) {
+      leftCol.push(g);
+      leftH += h;
+    } else {
+      rightCol.push(g);
+      rightH += h;
+    }
   });
 
   return (
     <div className="flex gap-3 px-4">
       <div className="flex-1 flex flex-col gap-3">
-        {leftCol.map((evt) => <WaterfallCard key={evt.id} event={evt} onClick={() => navigate(`/events/${evt.id}`)} />)}
+        {leftCol.map((g) => (
+          <WaterfallCard
+            key={g.groupKey}
+            group={g}
+            onClick={() => navigate(`/events/${g.primaryId}`)}
+          />
+        ))}
       </div>
       <div className="flex-1 flex flex-col gap-3">
-        {rightCol.map((evt) => <WaterfallCard key={evt.id} event={evt} onClick={() => navigate(`/events/${evt.id}`)} />)}
+        {rightCol.map((g) => (
+          <WaterfallCard
+            key={g.groupKey}
+            group={g}
+            onClick={() => navigate(`/events/${g.primaryId}`)}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
 /* ===== 瀑布流卡片 ===== */
-function WaterfallCard({ event, onClick }: { event: any; onClick: () => void }) {
-  // 封面取 coverImage 或第一张照片
-  const coverUrl = event.coverImage || (event.photos && event.photos.length > 0 ? event.photos[0].url : null);
-  const hasImage = !!coverUrl;
-  const statusText = event.status === "confirmed" ? "已确定" : "待定";
+function WaterfallCard({
+  group,
+  onClick,
+}: {
+  group: GroupedDiscoveryEvent;
+  onClick: () => void;
+}) {
+  const thumb = listThumbnailUrl(group.coverRawUrl);
+  const hasImage = !!thumb;
+  const statusText = group.status === "confirmed" ? "已确定" : "待定";
 
   return (
     <div
@@ -56,14 +119,17 @@ function WaterfallCard({ event, onClick }: { event: any; onClick: () => void }) 
       {hasImage ? (
         <div className="relative overflow-hidden">
           <img
-            src={coverUrl}
-            alt={event.title}
+            src={thumb}
+            alt={group.title}
             className="w-full object-cover"
             style={{ aspectRatio: "3/4" }}
             loading="lazy"
+            decoding="async"
           />
           <div className="absolute top-2 right-2">
-            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white font-medium ${event.status === "confirmed" ? "bg-red-500" : "bg-gray-400"}`}>
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full text-white font-medium ${group.status === "confirmed" ? "bg-red-500" : "bg-gray-400"}`}
+            >
               {statusText}
             </span>
           </div>
@@ -72,7 +138,9 @@ function WaterfallCard({ event, onClick }: { event: any; onClick: () => void }) 
         <div className="relative w-full flex items-center justify-center bg-gray-50" style={{ aspectRatio: "3/4" }}>
           <CalendarDays className="w-10 h-10 text-gray-200" />
           <div className="absolute top-2 right-2">
-            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white font-medium ${event.status === "confirmed" ? "bg-red-500" : "bg-gray-400"}`}>
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full text-white font-medium ${group.status === "confirmed" ? "bg-red-500" : "bg-gray-400"}`}
+            >
               {statusText}
             </span>
           </div>
@@ -81,11 +149,15 @@ function WaterfallCard({ event, onClick }: { event: any; onClick: () => void }) 
 
       <div className="p-3">
         <h3 className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug mb-1.5">
-          {event.title}
+          {group.title}
         </h3>
-        <div className="flex items-center gap-1 text-xs text-gray-400">
-          <CalendarDays className="w-3 h-3" />
-          <span>{event.date}</span>
+        <div className="space-y-1">
+          {group.dates.map((d) => (
+            <div key={d} className="flex items-center gap-1 text-xs text-gray-400">
+              <CalendarDays className="w-3 h-3 shrink-0" />
+              <span>{d}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -112,6 +184,8 @@ export function EventListPage() {
       if (!search) return true;
       return evt.title.toLowerCase().includes(search.toLowerCase());
     }) ?? [];
+
+  const groupedEvents = groupEventsByTitle(filteredEvents);
 
   const [newTitle, setNewTitle] = useState("");
   const [newDate, setNewDate] = useState("");
@@ -156,8 +230,8 @@ export function EventListPage() {
       </div>
 
       {/* Waterfall Grid */}
-      {filteredEvents.length > 0 ? (
-        <WaterfallGrid events={filteredEvents} />
+      {groupedEvents.length > 0 ? (
+        <WaterfallGrid groups={groupedEvents} />
       ) : (
         <div className="text-center py-20">
           <CalendarDays className="w-12 h-12 mx-auto mb-4 text-gray-200" />

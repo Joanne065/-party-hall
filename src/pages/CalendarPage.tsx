@@ -15,30 +15,47 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
+function toYMD(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** 月初末 ± padding，避免首屏 datesSet 尚未触发时空数据 */
+function initialCalendarVisibleRange(d = new Date()) {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const first = new Date(y, m, 1);
+  const last = new Date(y, m + 1, 0);
+  const from = new Date(first);
+  from.setDate(from.getDate() - 14);
+  const to = new Date(last);
+  to.setDate(to.getDate() + 14);
+  return { from: toYMD(from), to: toYMD(to) };
+}
+
 export function CalendarPage() {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
-  const [currentMonth, setCurrentMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  });
+  const [visibleRange, setVisibleRange] = useState(initialCalendarVisibleRange);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   // 状态筛选：all = 全部, confirmed = 已确定, pending = 待定
   const [statusFilter, setStatusFilter] = useState<"all" | "confirmed" | "pending">("all");
 
-  // 根据筛选状态查询
-  const queryParams: { month: string; status?: string } = { month: currentMonth };
-  if (statusFilter !== "all") {
-    queryParams.status = statusFilter;
-  }
-  const eventsQuery = trpc.event.list.useQuery(queryParams);
+  const eventsQuery = trpc.event.list.useQuery({
+    dateFrom: visibleRange.from,
+    dateTo: visibleRange.to,
+    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+  });
 
   const calendarEvents =
     eventsQuery.data?.map((evt: { id: number; title: string; date: string; status: string }) => ({
       id: String(evt.id),
       title: evt.title,
-      date: evt.date,
+      start: evt.date,
+      allDay: true,
       backgroundColor: evt.status === "confirmed" ? "#FF2442" : "#FFB800",
       borderColor: evt.status === "confirmed" ? "#FF2442" : "#FFB800",
       textColor: "#fff",
@@ -50,10 +67,12 @@ export function CalendarPage() {
     setDialogOpen(true);
   }, []);
 
-  const handleDatesSet = useCallback((info: any) => {
-    const date = info.view.currentStart;
-    const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    setCurrentMonth(month);
+  const handleDatesSet = useCallback((info: { start: Date; end: Date }) => {
+    const from = toYMD(info.start);
+    const endInclusive = new Date(info.end);
+    endInclusive.setDate(endInclusive.getDate() - 1);
+    const to = toYMD(endInclusive);
+    setVisibleRange({ from, to });
   }, []);
 
   const utils = trpc.useUtils();
@@ -251,6 +270,9 @@ export function CalendarPage() {
         .fc .fc-daygrid-day-frame { min-height: 80px; }
         .fc .fc-day-today { background-color: rgba(255,36,66,0.03) !important; }
         .fc .fc-daygrid-more-link { color: #999; font-size: 0.72rem; }
+        /* 灰色「上月末/下月初」格子里仍完整显示活动条 */
+        .fc .fc-day-other .fc-daygrid-day-events { min-height: 1px; opacity: 1; }
+        .fc .fc-day-other .fc-event { opacity: 1 !important; }
       `}</style>
     </div>
   );
