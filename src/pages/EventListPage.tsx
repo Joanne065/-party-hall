@@ -22,6 +22,33 @@ type GroupedDiscoveryEvent = {
   coverRawUrl: string | null;
 };
 
+function todayYMD(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** 含未来场次：按「最近一场」由近到远；仅过去：按「最近一场」由近到远（日期大的在前） */
+function sortGroupsByNearestDateFirst(groups: GroupedDiscoveryEvent[]): GroupedDiscoveryEvent[] {
+  const t = todayYMD();
+  function tierAndKey(dates: string[]): [0 | 1, string] {
+    const sorted = [...dates].sort();
+    const upcoming = sorted.filter((d) => d >= t);
+    if (upcoming.length > 0) {
+      return [0, upcoming[0]];
+    }
+    const past = sorted.filter((d) => d < t);
+    const key = past.length > 0 ? past[past.length - 1] : sorted[sorted.length - 1];
+    return [1, key];
+  }
+  return [...groups].sort((a, b) => {
+    const [ta, ka] = tierAndKey(a.dates);
+    const [tb, kb] = tierAndKey(b.dates);
+    if (ta !== tb) return ta - tb;
+    if (ta === 0) return ka.localeCompare(kb);
+    return kb.localeCompare(ka);
+  });
+}
+
 function groupEventsByTitle(raw: any[]): GroupedDiscoveryEvent[] {
   const map = new Map<string, any[]>();
   for (const e of raw) {
@@ -48,8 +75,7 @@ function groupEventsByTitle(raw: any[]): GroupedDiscoveryEvent[] {
       coverRawUrl,
     });
   }
-  groups.sort((a, b) => a.dates[0].localeCompare(b.dates[0]));
-  return groups;
+  return sortGroupsByNearestDateFirst(groups);
 }
 
 /* ===== 瀑布流两列布局 ===== */

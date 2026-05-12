@@ -557,16 +557,29 @@ function EventPhotosSection({
               onClick={() => onOpenLightbox(i)}
             >
               <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100">
-                <a href={photo.url} download={photo.filename || "photo"} onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-full bg-white/20">
-                  <Download className="w-3.5 h-3.5 text-white" />
-                </a>
-                {isAdmin && (
-                  <button onClick={() => deleteMutation.mutate({ id: photo.id })} className="p-1.5 rounded-full bg-red-500/60">
-                    <X className="w-3.5 h-3.5 text-white" />
-                  </button>
-                )}
-              </div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white shadow-md hover:bg-red-600"
+                  aria-label="删除照片"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm("确定删除这张照片？")) deleteMutation.mutate({ id: photo.id });
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <div className="pointer-events-none absolute inset-0 bg-black/0 transition-all group-hover:bg-black/20" />
+              <a
+                href={photo.url}
+                download={photo.filename || "photo"}
+                onClick={(e) => e.stopPropagation()}
+                className="pointer-events-auto absolute bottom-1.5 left-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white opacity-0 shadow-md transition-opacity hover:bg-black/60 group-hover:opacity-100"
+                aria-label="下载"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </a>
             </div>
           ))}
         </div>
@@ -595,6 +608,13 @@ function ReviewSection({ eventId, isAdmin, review, onPhotoClick }: { eventId: nu
   const [atmosphere, setAtmosphere] = useState("");
   const [improvements, setImprovements] = useState("");
   const [summary, setSummary] = useState("");
+
+  const deleteReviewPhotoMutation = trpc.review.deletePhoto.useMutation({
+    onSuccess: () => {
+      utils.review.getByEventId.invalidate({ eventId });
+      toast.success("照片已删除");
+    },
+  });
 
   const upsertMutation = trpc.review.upsert.useMutation({
     onSuccess: () => { utils.review.getByEventId.invalidate({ eventId }); setIsEditing(false); toast.success("回顾保存成功"); },
@@ -656,6 +676,30 @@ function ReviewSection({ eventId, isAdmin, review, onPhotoClick }: { eventId: nu
             <textarea value={improvements} onChange={(e) => setImprovements(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-xl text-sm border border-gray-100 bg-white outline-none resize-none" placeholder="记录需要改进的地方..." />
           </div>
           <ReviewPhotosUpload reviewId={review?.id} eventId={eventId} isAdmin={isAdmin} />
+          {isAdmin && review?.photos && review.photos.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs text-gray-400">已上传照片</p>
+              <div className="flex flex-wrap gap-2">
+                {review.photos.map((photo: any) => (
+                  <div key={photo.id} className="relative shrink-0 overflow-hidden rounded-xl" style={{ width: 88, height: 88 }}>
+                    <img src={photo.url} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white shadow-md hover:bg-red-600"
+                      aria-label="删除照片"
+                      onClick={() => {
+                        if (confirm("确定删除这张照片？")) {
+                          deleteReviewPhotoMutation.mutate({ id: photo.id });
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : review ? (
         <div className="space-y-3">
@@ -675,19 +719,34 @@ function ReviewSection({ eventId, isAdmin, review, onPhotoClick }: { eventId: nu
               {review.photos.map((photo: any) => (
                 <div
                   key={photo.id}
-                  className="group relative rounded-xl overflow-hidden shrink-0 cursor-pointer"
+                  className="group relative shrink-0 cursor-pointer overflow-hidden rounded-xl"
                   style={{ width: 100, height: 100 }}
                   onClick={() => onPhotoClick?.(photo.url)}
                 >
-                  <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <img src={photo.url} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white shadow-md hover:bg-red-600"
+                      aria-label="删除回顾照片"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm("确定删除这张照片？")) {
+                          deleteReviewPhotoMutation.mutate({ id: photo.id });
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover:bg-black/30 group-hover:opacity-100">
                     <a
                       href={photo.url}
                       download={photo.filename || "review-photo"}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-1.5 rounded-full bg-white/20"
+                      className="rounded-full bg-white/20 p-1.5"
                     >
-                      <Download className="w-3.5 h-3.5 text-white" />
+                      <Download className="h-3.5 w-3.5 text-white" />
                     </a>
                   </div>
                 </div>
