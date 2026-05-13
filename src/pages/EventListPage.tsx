@@ -27,6 +27,14 @@ function todayYMD(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** 合并卡片点进去时打开「最相关」的一场：优先即将开始的第一场，否则最近结束的一场 */
+function pickPrimaryEventId(sortedByDateAsc: { id: number; date: string }[]): number {
+  const t = todayYMD();
+  const upcoming = sortedByDateAsc.filter((e) => e.date >= t);
+  if (upcoming.length > 0) return upcoming[0]!.id;
+  return sortedByDateAsc[sortedByDateAsc.length - 1]!.id;
+}
+
 /** 含未来场次：按「最近一场」由近到远；仅过去：按「最近一场」由近到远（日期大的在前） */
 function sortGroupsByNearestDateFirst(groups: GroupedDiscoveryEvent[]): GroupedDiscoveryEvent[] {
   const t = todayYMD();
@@ -70,7 +78,7 @@ function groupEventsByTitle(raw: any[]): GroupedDiscoveryEvent[] {
       groupKey: sorted.map((x: { id: number }) => x.id).sort((a, b) => a - b).join("-"),
       title: sorted[0].title,
       dates: sorted.map((x: { date: string }) => x.date),
-      primaryId: sorted[0].id,
+      primaryId: pickPrimaryEventId(sorted.map((x: { id: number; date: string }) => ({ id: x.id, date: x.date }))),
       status: anyConfirmed ? "confirmed" : "pending",
       coverRawUrl,
     });

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
@@ -7,6 +7,7 @@ import {
   ArrowLeft, Copy, Pencil, Trash2, Upload, X, Download,
   MapPin, CalendarDays, Users, Sparkles, Lightbulb,
   Image, Camera, Check, ChevronLeft, ChevronRight,
+  ChevronUp, ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,10 +19,11 @@ type EventDetail = {
   endTime: string | null;
   location: string | null;
   description: string | null;
+  sessionIntro: string | null;
   tags: string[] | null;
   status: "confirmed" | "pending";
   coverImage: string | null;
-  photos: { id: number; url: string; filename: string | null }[];
+  photos: { id: number; url: string; filename: string | null; sortOrder?: number | null }[];
 };
 
 /* ===== Lightbox 大图查看器 ===== */
@@ -120,7 +122,12 @@ export function EventDetailPage() {
   const eventId = Number(id);
 
   const eventQuery = trpc.event.getById.useQuery({ id: eventId });
+  const groupQuery = trpc.event.getGroup.useQuery({ id: eventId });
   const utils = trpc.useUtils();
+
+  useEffect(() => {
+    setIsEditing(false);
+  }, [eventId]);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -129,6 +136,7 @@ export function EventDetailPage() {
   const [editEndTime, setEditEndTime] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editSessionIntro, setEditSessionIntro] = useState("");
   const [editStatus, setEditStatus] = useState<"confirmed" | "pending">("pending");
   const [editTagInput, setEditTagInput] = useState("");
 
@@ -139,6 +147,16 @@ export function EventDetailPage() {
   const event = eventQuery.data as EventDetail | undefined;
   const reviewQuery = trpc.review.getByEventId.useQuery({ eventId });
   const review = reviewQuery.data;
+
+  const syncThemeMutation = trpc.event.syncGroupTheme.useMutation({
+    onSuccess: (data) => {
+      utils.event.getById.invalidate({ id: eventId });
+      utils.event.getGroup.invalidate({ id: eventId });
+      utils.event.list.invalidate();
+      toast.success(`已同步到 ${data.updated} 个场次`);
+    },
+    onError: () => toast.error("同步失败"),
+  });
 
   // 获取所有图片（coverImage + photos + review photos）
   const allImages = (() => {
@@ -165,6 +183,7 @@ export function EventDetailPage() {
     setEditEndTime(evt.endTime ?? "");
     setEditLocation(evt.location ?? "");
     setEditDescription(evt.description ?? "");
+    setEditSessionIntro((evt as EventDetail).sessionIntro ?? "");
     setEditStatus(evt.status as "confirmed" | "pending");
     setEditTagInput((evt.tags ?? []).join(" "));
     setIsEditing(true);
@@ -173,6 +192,7 @@ export function EventDetailPage() {
   const updateMutation = trpc.event.update.useMutation({
     onSuccess: () => {
       utils.event.getById.invalidate({ id: eventId });
+      utils.event.getGroup.invalidate({ id: eventId });
       utils.event.list.invalidate();
       setIsEditing(false);
       toast.success("活动更新成功");
@@ -202,8 +222,25 @@ export function EventDetailPage() {
       endTime: editEndTime || undefined,
       location: editLocation || undefined,
       description: editDescription || undefined,
+      sessionIntro: editSessionIntro.trim() === "" ? null : editSessionIntro.trim(),
       tags: tags.length > 0 ? tags : undefined,
       status: editStatus,
+    });
+  };
+
+  const handleSyncGroupTheme = () => {
+    if (!groupQuery.data?.isMulti) return;
+    if (!confirm("将标题、活动介绍、标签同步到所有同标题场次（不含日期与「本场介绍」），确定？")) return;
+    const tags = editTagInput
+      .split(/[\s,，]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    syncThemeMutation.mutate({
+      sourceEventId: eventId,
+      title: editTitle,
+      description: editDescription.trim() === "" ? null : editDescription,
+      tags,
+      coverImage: event?.coverImage ?? null,
     });
   };
 
@@ -217,6 +254,8 @@ export function EventDetailPage() {
 
     if (evt.title) lines.push(evt.title);
     if (evt.description) lines.push("\n" + evt.description);
+    const si = (evt as EventDetail).sessionIntro;
+    if (si) lines.push("\n【本场】" + si);
     if (evt.tags && evt.tags.length > 0) {
       lines.push("\n" + evt.tags.map((t: string) => "#" + t).join(" "));
     }
@@ -288,6 +327,27 @@ export function EventDetailPage() {
       </div>
 
       <div className="max-w-lg mx-auto">
+        {groupQuery.data?.isMulti && (
+          <div className="flex gap-2 overflow-x-auto px-4 py-2 border-b border-gray-50 bg-white">
+            <span className="shrink-0 self-center text-[10px] text-gray-400 mr-1">场次</span>
+            {groupQuery.data.members.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => navigate(`/events/${m.id}`)}
+                className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  m.id === eventId
+                    ? "bg-red-500 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {m.date}
+                {m.status === "pending" ? " · 待定" : ""}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* ===== 大图轮播区 ===== */}
         {allImages.length > 0 ? (
           <div className="relative w-full" style={{ aspectRatio: "3/4" }}>
@@ -392,8 +452,14 @@ export function EventDetailPage() {
 
               {/* 介绍 */}
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">活动介绍（可直接粘贴小红书文案）</label>
+                <label className="text-xs text-gray-400 mb-1 block">活动介绍（主题通用，可一键同步到各场次）</label>
                 <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={6} className="w-full px-3 py-2 rounded-xl text-sm border border-gray-100 bg-gray-50 outline-none resize-none text-gray-900" placeholder="输入活动介绍..." />
+              </div>
+
+              {/* 本场次介绍（每场不同） */}
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">本场介绍（仅本场显示，不同场次可写不同文案）</label>
+                <textarea value={editSessionIntro} onChange={(e) => setEditSessionIntro(e.target.value)} rows={4} className="w-full px-3 py-2 rounded-xl text-sm border border-gray-100 bg-gray-50 outline-none resize-none text-gray-900" placeholder="例如本场嘉宾、流程、注意事项…" />
               </div>
 
               {/* 标签 - 文本输入一键解析 */}
@@ -419,6 +485,17 @@ export function EventDetailPage() {
                   </div>
                 )}
               </div>
+
+              {groupQuery.data?.isMulti && isAdmin && (
+                <button
+                  type="button"
+                  onClick={handleSyncGroupTheme}
+                  disabled={syncThemeMutation.isPending}
+                  className="w-full h-10 rounded-xl text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50"
+                >
+                  {syncThemeMutation.isPending ? "同步中…" : "将标题、活动介绍、标签同步到全部同名场次"}
+                </button>
+              )}
             </div>
           ) : (
             /* ===== 查看模式 - 小红书风格 ===== */
@@ -447,6 +524,13 @@ export function EventDetailPage() {
               {event.description && (
                 <div className="text-sm text-gray-700 leading-relaxed mb-4 whitespace-pre-line">
                   {event.description}
+                </div>
+              )}
+
+              {event.sessionIntro && (
+                <div className="mb-4 rounded-xl bg-gray-50 px-3 py-2.5">
+                  <p className="text-[10px] font-medium text-gray-400 mb-1">本场介绍</p>
+                  <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-line">{event.sessionIntro}</p>
                 </div>
               )}
 
@@ -504,7 +588,7 @@ function EventPhotosSection({
 }: {
   eventId: number;
   isAdmin: boolean;
-  photos: { id: number; url: string; filename: string | null }[];
+  photos: { id: number; url: string; filename: string | null; sortOrder?: number | null }[];
   onOpenLightbox: (index: number) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -517,6 +601,19 @@ function EventPhotosSection({
   const deleteMutation = trpc.photo.delete.useMutation({
     onSuccess: () => { utils.event.getById.invalidate({ id: eventId }); toast.success("照片已删除"); },
   });
+  const reorderMutation = trpc.photo.reorder.useMutation({
+    onSuccess: () => { utils.event.getById.invalidate({ id: eventId }); toast.success("排序已更新"); },
+  });
+
+  const movePhoto = (index: number, delta: -1 | 1) => {
+    const next = index + delta;
+    if (next < 0 || next >= photos.length) return;
+    const ids = photos.map((p) => p.id);
+    const tmp = ids[index]!;
+    ids[index] = ids[next]!;
+    ids[next] = tmp;
+    reorderMutation.mutate({ eventId, orderedPhotoIds: ids });
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -550,13 +647,35 @@ function EventPhotosSection({
       {photos.length > 0 ? (
         <div className="flex gap-2 overflow-x-auto px-4 pb-2 snap-x snap-mandatory" style={{ scrollbarWidth: "none" }}>
           {photos.map((photo, i) => (
-            <div
-              key={photo.id}
-              className="group relative rounded-xl overflow-hidden shrink-0 snap-start cursor-pointer"
-              style={{ width: 120, height: 120 }}
-              onClick={() => onOpenLightbox(i)}
-            >
-              <img src={photo.url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
+            <div key={photo.id} className="flex shrink-0 snap-start items-stretch gap-1">
+              {isAdmin && photos.length > 1 && (
+                <div className="flex flex-col justify-center gap-0.5 py-1">
+                  <button
+                    type="button"
+                    disabled={i === 0 || reorderMutation.isPending}
+                    onClick={(e) => { e.stopPropagation(); movePhoto(i, -1); }}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-30"
+                    aria-label="前移"
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={i === photos.length - 1 || reorderMutation.isPending}
+                    onClick={(e) => { e.stopPropagation(); movePhoto(i, 1); }}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-30"
+                    aria-label="后移"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              <div
+                className="group relative overflow-hidden rounded-xl cursor-pointer"
+                style={{ width: 120, height: 120 }}
+                onClick={() => onOpenLightbox(i)}
+              >
+              <img src={photo.url} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
               {isAdmin && (
                 <button
                   type="button"
@@ -580,6 +699,7 @@ function EventPhotosSection({
               >
                 <Download className="h-3.5 w-3.5" />
               </a>
+            </div>
             </div>
           ))}
         </div>

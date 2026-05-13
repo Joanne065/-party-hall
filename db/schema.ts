@@ -12,6 +12,8 @@ export const events = sqliteTable("events", {
   endTime: text("end_time"),
   location: text("location", { length: 255 }),
   description: text("description"),
+  /** 同主题不同场次专用文案（每场一条） */
+  sessionIntro: text("session_intro"),
   tags: text("tags", { mode: "json" }).$type<string[]>(),
   status: text("status", { length: 20 }).notNull().default("pending"),
   coverImage: text("cover_image", { length: 500 }),
@@ -24,6 +26,7 @@ export const eventPhotos = sqliteTable("event_photos", {
   eventId: integer("event_id").notNull(),
   url: text("url", { length: 500 }).notNull(),
   filename: text("filename", { length: 255 }),
+  sortOrder: integer("sort_order", { mode: "number" }).default(0),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
 

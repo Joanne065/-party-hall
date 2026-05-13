@@ -26,6 +26,7 @@ export async function initDatabase() {
           end_time TEXT,
           location TEXT,
           description TEXT,
+          session_intro TEXT,
           tags TEXT,
           status TEXT NOT NULL DEFAULT 'pending',
           cover_image TEXT,
@@ -40,6 +41,7 @@ export async function initDatabase() {
           event_id INTEGER NOT NULL,
           url TEXT NOT NULL,
           filename TEXT,
+          sort_order INTEGER DEFAULT 0,
           created_at INTEGER DEFAULT (unixepoch())
         )
       `);

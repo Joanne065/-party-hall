@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, publicQuery } from "./router-base";
 import { db } from "./queries/connection";
 import { eventPhotos } from "@db/schema";
@@ -24,6 +25,13 @@ export const photoRouter = router({
       adminOnly(ctx as { role: string | null });
       const results = [];
 
+      const existing = await db
+        .select()
+        .from(eventPhotos)
+        .where(eq(eventPhotos.eventId, input.eventId));
+      let nextOrder =
+        existing.reduce((m, r) => Math.max(m, r.sortOrder ?? 0), -1) + 1;
+
       for (const file of input.files) {
         // 先尝试上传到 Cloudinary
         const cloudinaryResult = await uploadToCloudinary(file.data, file.name);
@@ -34,6 +42,7 @@ export const photoRouter = router({
             eventId: input.eventId,
             url: cloudinaryResult.url,
             filename: file.name,
+            sortOrder: nextOrder++,
           });
           results.push({
             id: Number(result.lastInsertRowid),
@@ -61,6 +70,7 @@ export const photoRouter = router({
             eventId: input.eventId,
             url: `/uploads/${filename}`,
             filename: file.name,
+            sortOrder: nextOrder++,
           });
 
           results.push({
@@ -72,6 +82,37 @@ export const photoRouter = router({
       }
 
       return results;
+    }),
+
+  reorder: publicQuery
+    .input(
+      z.object({
+        eventId: z.number(),
+        orderedPhotoIds: z.array(z.number()).min(1),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      adminOnly(ctx as { role: string | null });
+      const pics = await db
+        .select()
+        .from(eventPhotos)
+        .where(eq(eventPhotos.eventId, input.eventId));
+      const allowed = new Set(pics.map((p) => p.id));
+      for (const pid of input.orderedPhotoIds) {
+        if (!allowed.has(pid)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid photo id for this event" });
+        }
+      }
+      if (input.orderedPhotoIds.length !== allowed.size) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Must include every photo id for reorder" });
+      }
+      for (let i = 0; i < input.orderedPhotoIds.length; i++) {
+        await db
+          .update(eventPhotos)
+          .set({ sortOrder: i })
+          .where(eq(eventPhotos.id, input.orderedPhotoIds[i]!));
+      }
+      return true;
     }),
 
   delete: publicQuery
