@@ -1,9 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { DayCellMountArg } from "@fullcalendar/core";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { Plus, Check, CalendarDays } from "lucide-react";
@@ -106,16 +105,64 @@ export function CalendarPage() {
     onError: (err) => toast.error(err.message || "添加失败"),
   });
 
-  const handleDayCellDidMount = useCallback((arg: DayCellMountArg) => {
-    if (!isAdmin) return;
-    const el = arg.el;
-    const handler = () => {
-      setPickDate(toYMD(arg.date));
-      setPickDateOpen(true);
+  const calendarWrapRef = useRef<HTMLDivElement>(null);
+  const isAdminRef = useRef(isAdmin);
+  isAdminRef.current = isAdmin;
+
+  const openDayPicker = useCallback((dateStr: string) => {
+    setPickDate(dateStr);
+    setPickDateOpen(true);
+  }, []);
+
+  const openNewEventForDate = useCallback((dateStr: string) => {
+    setPickDateOpen(false);
+    setNewDate(dateStr);
+    setNewTitle("");
+    setNewStatus("pending");
+    setNewEventOpen(true);
+  }, []);
+
+  // 事件委托：避免 isAdmin 异步就绪时日格已挂载但未绑监听
+  useEffect(() => {
+    const root = calendarWrapRef.current;
+    if (!root) return;
+
+    const onDblClick = (e: MouseEvent) => {
+      if (!isAdminRef.current) return;
+      const target = e.target as HTMLElement;
+      if (target.closest(".fc-event, .fc-daygrid-more-link")) return;
+      const cell = target.closest(".fc-daygrid-day[data-date]");
+      if (!cell) return;
+      const dateStr = cell.getAttribute("data-date");
+      if (!dateStr) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openDayPicker(dateStr);
     };
-    el.addEventListener("dblclick", handler);
-    // FullCalendar 无 unmount 回调，格子的 DOM 会随视图重建
-  }, [isAdmin]);
+
+    root.addEventListener("dblclick", onDblClick, true);
+    return () => root.removeEventListener("dblclick", onDblClick, true);
+  }, [openDayPicker]);
+
+  const lastDateClickRef = useRef<{ dateStr: string; at: number } | null>(null);
+
+  const handleDateClick = useCallback(
+    (info: { dateStr: string; jsEvent: MouseEvent }) => {
+      if (!isAdminRef.current) return;
+      const target = info.jsEvent.target as HTMLElement;
+      if (target.closest(".fc-event, .fc-daygrid-more-link")) return;
+
+      const now = Date.now();
+      const last = lastDateClickRef.current;
+      if (last && last.dateStr === info.dateStr && now - last.at < 450) {
+        lastDateClickRef.current = null;
+        openDayPicker(info.dateStr);
+        return;
+      }
+      lastDateClickRef.current = { dateStr: info.dateStr, at: now };
+    },
+    [openDayPicker],
+  );
 
   const handleCreateEvent = () => {
     if (!newTitle.trim() || !newDate) return;
@@ -136,7 +183,8 @@ export function CalendarPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">活动日历</h1>
           <p className="text-xs text-gray-400 mt-0.5">
-            点击活动查看详情{isAdmin ? " · 双击空白日期添加已有活动" : ""}
+            点击活动查看详情
+            {isAdmin ? " · 双击空白日期添加活动或新建" : ""}
           </p>
         </div>
         {isAdmin && (
@@ -192,12 +240,16 @@ export function CalendarPage() {
       </div>
 
       {/* FullCalendar */}
-      <div className="rounded-2xl overflow-hidden border border-gray-100">
+      <div
+        ref={calendarWrapRef}
+        className="rounded-2xl overflow-hidden border border-gray-100"
+      >
         <FullCalendar
           plugins={[dayGridPlugin, interactionPlugin]}
           initialView="dayGridMonth"
           events={calendarEvents}
           eventClick={handleEventClick}
+          dateClick={handleDateClick}
           datesSet={handleDatesSet}
           headerToolbar={{
             left: "prev,next today",
@@ -209,7 +261,6 @@ export function CalendarPage() {
           height="auto"
           dayMaxEvents={3}
           eventDisplay="block"
-          dayCellDidMount={handleDayCellDidMount}
           dayCellClassNames={() => "hover:bg-red-50/30 transition-colors"}
           dayHeaderClassNames={() => "text-xs font-normal text-gray-400 uppercase"}
           titleFormat={{ year: "numeric", month: "long" }}
@@ -265,8 +316,16 @@ export function CalendarPage() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-gray-400 -mt-2">
-            选择活动主题（同名只显示一次）。会复制海报与介绍，不会删除原场次内容。
+            选择已有活动主题添加场次，或新建全新活动。复制场次会保留海报与介绍，不会删除原内容。
           </p>
+          <Button
+            type="button"
+            onClick={() => openNewEventForDate(pickDate)}
+            className="w-full h-10 text-sm rounded-full bg-red-500 hover:bg-red-600 text-white border-0 flex items-center justify-center gap-1.5 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            新建全新活动
+          </Button>
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0 py-2">
             {themesQuery.isLoading && (
               <p className="text-sm text-gray-400 text-center py-8">加载中…</p>
