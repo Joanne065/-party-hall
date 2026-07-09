@@ -3,9 +3,10 @@ import { useNavigate } from "react-router";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
+import type { DayCellMountArg } from "@fullcalendar/core";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
-import { Plus, Check } from "lucide-react";
+import { Plus, Check, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { listThumbnailUrl } from "@/lib/imageUrl";
 
 function toYMD(d: Date) {
   const y = d.getFullYear();
@@ -88,6 +90,33 @@ export function CalendarPage() {
   const [newDate, setNewDate] = useState("");
   const [newStatus, setNewStatus] = useState<"confirmed" | "pending">("pending");
 
+  const [pickDateOpen, setPickDateOpen] = useState(false);
+  const [pickDate, setPickDate] = useState("");
+  const themesQuery = trpc.event.listUniqueThemes.useQuery(undefined, {
+    enabled: pickDateOpen && isAdmin,
+  });
+
+  const addSessionMutation = trpc.event.addSessionToDate.useMutation({
+    onSuccess: (data) => {
+      utils.event.list.invalidate();
+      utils.event.listUniqueThemes.invalidate();
+      setPickDateOpen(false);
+      toast.success(`已添加到 ${data.date}`);
+    },
+    onError: (err) => toast.error(err.message || "添加失败"),
+  });
+
+  const handleDayCellDidMount = useCallback((arg: DayCellMountArg) => {
+    if (!isAdmin) return;
+    const el = arg.el;
+    const handler = () => {
+      setPickDate(toYMD(arg.date));
+      setPickDateOpen(true);
+    };
+    el.addEventListener("dblclick", handler);
+    // FullCalendar 无 unmount 回调，格子的 DOM 会随视图重建
+  }, [isAdmin]);
+
   const handleCreateEvent = () => {
     if (!newTitle.trim() || !newDate) return;
     createMutation.mutate({
@@ -106,7 +135,9 @@ export function CalendarPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-gray-900">活动日历</h1>
-          <p className="text-xs text-gray-400 mt-0.5">点击活动查看详情</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            点击活动查看详情{isAdmin ? " · 双击空白日期添加已有活动" : ""}
+          </p>
         </div>
         {isAdmin && (
           <Button
@@ -178,6 +209,7 @@ export function CalendarPage() {
           height="auto"
           dayMaxEvents={3}
           eventDisplay="block"
+          dayCellDidMount={handleDayCellDidMount}
           dayCellClassNames={() => "hover:bg-red-50/30 transition-colors"}
           dayHeaderClassNames={() => "text-xs font-normal text-gray-400 uppercase"}
           titleFormat={{ year: "numeric", month: "long" }}
@@ -220,6 +252,61 @@ export function CalendarPage() {
                 </Button>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 双击日期：从已有活动（去重）添加到该日 */}
+      <Dialog open={pickDateOpen} onOpenChange={setPickDateOpen}>
+        <DialogContent className="sm:max-w-md bg-white border-0 rounded-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900 font-bold">
+              添加到 {pickDate}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-gray-400 -mt-2">
+            选择活动主题（同名只显示一次）。会复制海报与介绍，不会删除原场次内容。
+          </p>
+          <div className="flex-1 overflow-y-auto space-y-2 min-h-0 py-2">
+            {themesQuery.isLoading && (
+              <p className="text-sm text-gray-400 text-center py-8">加载中…</p>
+            )}
+            {themesQuery.data?.length === 0 && !themesQuery.isLoading && (
+              <p className="text-sm text-gray-400 text-center py-8">还没有活动，请先新建</p>
+            )}
+            {themesQuery.data?.map((theme) => {
+              const alreadyOnDate = theme.sessionDates.includes(pickDate);
+              const thumb = listThumbnailUrl(theme.coverImage);
+              return (
+                <button
+                  key={theme.templateEventId}
+                  type="button"
+                  disabled={alreadyOnDate || addSessionMutation.isPending}
+                  onClick={() =>
+                    addSessionMutation.mutate({
+                      copyFromEventId: theme.templateEventId,
+                      date: pickDate,
+                    })
+                  }
+                  className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-red-200 hover:bg-red-50/30 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {thumb ? (
+                    <img src={thumb} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                      <CalendarDays className="w-5 h-5 text-gray-300" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900 truncate">{theme.title}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      已有 {theme.sessionDates.length} 个场次
+                      {alreadyOnDate ? " · 该日已有" : ""}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

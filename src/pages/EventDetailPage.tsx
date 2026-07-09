@@ -23,6 +23,7 @@ type EventDetail = {
   tags: string[] | null;
   status: "confirmed" | "pending";
   coverImage: string | null;
+  themeLocal?: boolean | null;
   photos: { id: number; url: string; filename: string | null; sortOrder?: number | null }[];
 };
 
@@ -139,6 +140,7 @@ export function EventDetailPage() {
   const [editSessionIntro, setEditSessionIntro] = useState("");
   const [editStatus, setEditStatus] = useState<"confirmed" | "pending">("pending");
   const [editTagInput, setEditTagInput] = useState("");
+  const [editThemeLocal, setEditThemeLocal] = useState(false);
 
   // Lightbox 状态
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -186,6 +188,7 @@ export function EventDetailPage() {
     setEditSessionIntro((evt as EventDetail).sessionIntro ?? "");
     setEditStatus(evt.status as "confirmed" | "pending");
     setEditTagInput((evt.tags ?? []).join(" "));
+    setEditThemeLocal(Boolean((evt as EventDetail).themeLocal));
     setIsEditing(true);
   }, [eventQuery.data]);
 
@@ -225,6 +228,7 @@ export function EventDetailPage() {
       sessionIntro: editSessionIntro.trim() === "" ? null : editSessionIntro.trim(),
       tags: tags.length > 0 ? tags : undefined,
       status: editStatus,
+      themeLocal: editThemeLocal,
     });
   };
 
@@ -456,6 +460,20 @@ export function EventDetailPage() {
                 <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={6} className="w-full px-3 py-2 rounded-xl text-sm border border-gray-100 bg-gray-50 outline-none resize-none text-gray-900" placeholder="输入活动介绍..." />
               </div>
 
+              <label className="flex items-start gap-2 cursor-pointer rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={editThemeLocal}
+                  onChange={(e) => setEditThemeLocal(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span className="text-xs text-gray-600 leading-relaxed">
+                  <span className="font-medium text-gray-800">仅本场编辑海报/介绍</span>
+                  <br />
+                  勾选后，标题、活动介绍、标签的修改只影响当前日期；不勾选则自动同步到同名且未单独编辑的场次。
+                </span>
+              </label>
+
               {/* 本场次介绍（每场不同） */}
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">本场介绍（仅本场显示，不同场次可写不同文案）</label>
@@ -486,14 +504,14 @@ export function EventDetailPage() {
                 )}
               </div>
 
-              {groupQuery.data?.isMulti && isAdmin && (
+              {groupQuery.data?.isMulti && isAdmin && !editThemeLocal && (
                 <button
                   type="button"
                   onClick={handleSyncGroupTheme}
                   disabled={syncThemeMutation.isPending}
                   className="w-full h-10 rounded-xl text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50"
                 >
-                  {syncThemeMutation.isPending ? "同步中…" : "将标题、活动介绍、标签同步到全部同名场次"}
+                  {syncThemeMutation.isPending ? "同步中…" : "立即同步标题、活动介绍、标签到全部同名场次"}
                 </button>
               )}
             </div>

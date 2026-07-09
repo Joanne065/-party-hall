@@ -48,6 +48,7 @@ if (isProduction() && tursoUrl && tursoToken) {
       tags TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       cover_image TEXT,
+      theme_local INTEGER DEFAULT 0,
       created_at INTEGER DEFAULT (unixepoch()),
       updated_at INTEGER DEFAULT (unixepoch())
     )

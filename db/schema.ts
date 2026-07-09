@@ -17,6 +17,8 @@ export const events = sqliteTable("events", {
   tags: text("tags", { mode: "json" }).$type<string[]>(),
   status: text("status", { length: 20 }).notNull().default("pending"),
   coverImage: text("cover_image", { length: 500 }),
+  /** true = 海报/介绍仅本场，不参与同名场次自动同步 */
+  themeLocal: integer("theme_local", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });

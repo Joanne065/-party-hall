@@ -1,9 +1,31 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, publicQuery } from "./router-base";
 import { db } from "./queries/connection";
 import { events, eventPhotos, eventReviews, reviewPhotos } from "@db/schema";
 import { eq, and, like, desc, gte, lte, inArray } from "drizzle-orm";
 import { adminOnly } from "./middleware";
+
+type EventRow = typeof events.$inferSelect;
+
+function titleKey(title: string) {
+  return title.trim();
+}
+
+async function syncThemeToGroup(
+  source: EventRow,
+  patch: Partial<Pick<EventRow, "title" | "description" | "coverImage" | "tags">>
+) {
+  const key = titleKey(source.title);
+  const allRows = await db.select().from(events);
+  const memberIds = allRows
+    .filter((e) => titleKey(e.title) === key && !e.themeLocal)
+    .map((m) => m.id);
+  if (memberIds.length === 0) return 0;
+  if (Object.keys(patch).length === 0) return 0;
+  await db.update(events).set(patch as Record<string, unknown>).where(inArray(events.id, memberIds));
+  return memberIds.length;
+}
 
 export const eventRouter = router({
   list: publicQuery
@@ -86,7 +108,78 @@ export const eventRouter = router({
       return { members, isMulti: members.length > 1 };
     }),
 
-  /** 将主题级字段同步到所有同名场次（不含场次日期、场次介绍） */
+  /** 日历双击选活动：按标题去重后的主题列表 */
+  listUniqueThemes: publicQuery.query(async () => {
+    const all = await db.select().from(events).orderBy(desc(events.date));
+    const map = new Map<
+      string,
+      {
+        title: string;
+        templateEventId: number;
+        coverImage: string | null;
+        description: string | null;
+        sessionDates: string[];
+      }
+    >();
+    for (const e of all) {
+      const key = titleKey(e.title);
+      if (!key) continue;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          title: e.title.trim(),
+          templateEventId: e.id,
+          coverImage: e.coverImage,
+          description: e.description,
+          sessionDates: [e.date],
+        });
+      } else if (!existing.sessionDates.includes(e.date)) {
+        existing.sessionDates.push(e.date);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+  }),
+
+  /** 将已有活动复制到新日期（不移动/删除原场次与照片） */
+  addSessionToDate: publicQuery
+    .input(
+      z.object({
+        copyFromEventId: z.number(),
+        date: z.string(),
+        status: z.enum(["confirmed", "pending"]).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      adminOnly(ctx as { role: string | null });
+      const sourceRows = await db.select().from(events).where(eq(events.id, input.copyFromEventId)).limit(1);
+      if (sourceRows.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "源活动不存在" });
+      }
+      const source = sourceRows[0]!;
+      const key = titleKey(source.title);
+      const allRows = await db.select().from(events);
+      const duplicate = allRows.some((e) => titleKey(e.title) === key && e.date === input.date);
+      if (duplicate) {
+        throw new TRPCError({ code: "CONFLICT", message: "该日期已有同名活动" });
+      }
+
+      const result = await db.insert(events).values({
+        title: source.title.trim(),
+        date: input.date,
+        startTime: source.startTime,
+        endTime: source.endTime,
+        location: source.location,
+        description: source.description,
+        tags: source.tags ?? [],
+        coverImage: source.coverImage,
+        sessionIntro: null,
+        status: input.status ?? source.status,
+        themeLocal: false,
+      });
+      return { id: Number(result.lastInsertRowid), date: input.date, title: source.title.trim() };
+    }),
+
+  /** 将主题级字段同步到所有同名场次（不含场次日期、场次介绍；跳过 themeLocal 场次） */
   syncGroupTheme: publicQuery
     .input(
       z.object({
@@ -101,9 +194,11 @@ export const eventRouter = router({
       adminOnly(ctx as { role: string | null });
       const row = await db.select().from(events).where(eq(events.id, input.sourceEventId)).limit(1);
       if (row.length === 0) return { updated: 0 };
-      const key = row[0].title.trim();
+      const key = titleKey(row[0].title);
       const allRows = await db.select().from(events);
-      const memberIds = allRows.filter((e) => e.title.trim() === key).map((m) => m.id);
+      const memberIds = allRows
+        .filter((e) => titleKey(e.title) === key && !e.themeLocal)
+        .map((m) => m.id);
       if (memberIds.length === 0) return { updated: 0 };
 
       const patch: Partial<typeof events.$inferInsert> = {};
@@ -155,13 +250,43 @@ export const eventRouter = router({
         status: z.enum(["confirmed", "pending"]).optional(),
         coverImage: z.string().optional(),
         sessionIntro: z.string().nullable().optional(),
+        themeLocal: z.boolean().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       adminOnly(ctx as { role: string | null });
-      const { id, ...data } = input;
-      await db.update(events).set(data).where(eq(events.id, id));
-      return { id, ...data };
+      const { id, themeLocal, ...data } = input;
+
+      const currentRows = await db.select().from(events).where(eq(events.id, id)).limit(1);
+      if (currentRows.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "活动不存在" });
+      }
+      const current = currentRows[0]!;
+
+      const rowPatch: Record<string, unknown> = { ...data };
+      if (themeLocal !== undefined) rowPatch.themeLocal = themeLocal;
+
+      await db.update(events).set(rowPatch).where(eq(events.id, id));
+
+      const effectiveLocal = themeLocal ?? current.themeLocal ?? false;
+      const themeChanged =
+        data.title !== undefined ||
+        data.description !== undefined ||
+        data.tags !== undefined ||
+        data.coverImage !== undefined;
+
+      if (!effectiveLocal && themeChanged) {
+        const updated = await db.select().from(events).where(eq(events.id, id)).limit(1);
+        const row = updated[0] ?? current;
+        await syncThemeToGroup(row, {
+          title: row.title,
+          description: row.description,
+          coverImage: row.coverImage,
+          tags: row.tags ?? [],
+        });
+      }
+
+      return { id, ...data, themeLocal: effectiveLocal };
     }),
 
   delete: publicQuery
